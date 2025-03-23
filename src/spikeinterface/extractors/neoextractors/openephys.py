@@ -237,7 +237,10 @@ class OpenEphysBinaryRecordingExtractor(NeoBaseRecordingExtractor):
             stream_folder = recording_folder / f"experiment{exp_id}" / f"recording{rec_id}" / "continuous" / oe_stream
             stream_folders.append(stream_folder)
             if load_sync_timestamps:
-                if (stream_folder / "sample_numbers.npy").is_file():
+                if (stream_folder / "global_timestamps.npy").is_file():
+                    # This is my custom sync solution
+                    sync_times = np.load(stream_folder / "global_timestamps.npy")
+                elif (stream_folder / "sample_numbers.npy").is_file():
                     # OE version>=v0.6
                     sync_times = np.load(stream_folder / "timestamps.npy")
                 elif (stream_folder / "synchronized_timestamps.npy").is_file():
@@ -291,14 +294,34 @@ class OpenEphysBinaryEventExtractor(NeoBaseEventExtractor):
 
     NeoRawIOClass = "OpenEphysBinaryRawIO"
 
-    def __init__(self, folder_path, block_index=None):
+    def __init__(self, folder_path, block_index=None,load_sync_timestamps=False):
         neo_kwargs = self.map_to_neo_kwargs(folder_path)
         NeoBaseEventExtractor.__init__(self, block_index=block_index, **neo_kwargs)
+        if load_sync_timestamps:        
+            self._load_sync_timestamps()
 
     @classmethod
     def map_to_neo_kwargs(cls, folder_path):
         neo_kwargs = {"dirname": str(folder_path)}
         return neo_kwargs
+
+    def _load_sync_timestamps(self):
+        # Try to load synchronisation timestamps
+        # Need to modify thhe base neo reader inside the si object
+        neo_reader = self.neo_reader
+        for block_index in range(neo_reader.block_count()):
+            for seg_index in range(neo_reader.segment_count(block_index)):
+                for event_stream_idx in range(neo_reader.event_channels_count()):
+                    event_stream = neo_reader._evt_streams[block_index][seg_index][event_stream_idx]
+                    if event_stream['channel_name'] == 'Messages':
+                        continue
+                    else:
+                        global_ts = event_stream.get('global_timestamps')
+                        if global_ts is not None and len(global_ts) > 0:
+                            event_stream['timestamps'] = global_ts
+                            print(f'Using global timestamps for {event_stream["channel_name"]}')
+                        else:
+                            print(f'Using local timestamps for {event_stream["channel_name"]}')
 
 
 def read_openephys(folder_path, **kwargs):
@@ -351,7 +374,7 @@ def read_openephys(folder_path, **kwargs):
     return recording
 
 
-def read_openephys_event(folder_path, block_index=None):
+def read_openephys_event(folder_path, block_index=None, load_sync_timestamps=False):
     """
     Read Open Ephys events from "binary" format.
 
@@ -372,5 +395,6 @@ def read_openephys_event(folder_path, block_index=None):
         raise Exception("Events can be read only from 'binary' format")
     else:
         # format = 'binary'
-        event = OpenEphysBinaryEventExtractor(folder_path, block_index=block_index)
+        event = OpenEphysBinaryEventExtractor(folder_path, 
+                block_index=block_index, load_sync_timestamps=load_sync_timestamps)
     return event

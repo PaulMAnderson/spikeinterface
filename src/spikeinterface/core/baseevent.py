@@ -128,6 +128,34 @@ class BaseEvent(BaseExtractor):
         seg_ev = self._event_segments[segment_index]
         return seg_ev.get_event_times(channel_id, start_time, end_time)
 
+    def set_times(self, times, segment_index=None, with_warning=True):
+        # Added to try and incorporate open-ephys synchronization
+        """Set times for events
+
+        Parameters
+        ----------
+        times : 1d np.array
+            The time vector
+        segment_index : int or None, default: None
+            The segment index (required for multi-segment)
+        with_warning : bool, default: True
+            If True, a warning is printed
+        """
+        segment_index = self._check_segment_index(segment_index)
+        rs = self._recording_segments[segment_index]
+
+        assert times.ndim == 1, "Time must have ndim=1"
+        assert rs.get_num_samples() == times.shape[0], "times have wrong shape"
+
+        rs.t_start = None
+        rs.time_vector = times.astype("float64", copy=False)
+
+        if with_warning:
+            warnings.warn(
+                "Setting times with Recording.set_times() is not recommended because "
+                "times are not always propagated across preprocessing"
+                "Use this carefully!"
+            )
 
 class BaseEventSegment(BaseSegment):
     """
